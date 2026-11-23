@@ -126,6 +126,7 @@ pub fn do_rewrite(ctx: &mut Ctx) -> Result<PathBuf> {
     // exefs patches (IPS, pchtxt) of the enabled mods, by build id
     let modplan = mods_plan(ctx, &exe_dir, &modules, false)?;
     let entry_of = |m: &str| modplan.iter().find(|(n, _)| n == m).map(|(_, e)| e);
+    let mut no_input: Vec<String> = Vec::new();
     for (i, m) in modules.iter().enumerate() {
         if ctx.cancelled() {
             return Err(PipelineError::Cancelled);
@@ -141,6 +142,7 @@ pub fn do_rewrite(ctx: &mut Ctx) -> Result<PathBuf> {
         let src = exe_dir.join(m);
         if !is_file(&src) {
             ctx.log(&format!("  {m}: no input {} -- skipping", src.display()));
+            no_input.push(m.clone());
             continue;
         }
         let sub = out_dir.join(m);
@@ -244,6 +246,28 @@ pub fn do_rewrite(ctx: &mut Ctx) -> Result<PathBuf> {
             }
         }
         release_memory(&format!("after-rewrite-{m}"), &*ctx.log, &*ctx.mem);
+    }
+    // A module the profile lists but this game's ExeFS does not carry (a .nup, a base game without its update, a build the profile was not derived from) was skipped above;
+    // left in `modules`, stage 4a's make_flat refused the whole build with "the rewrite wrote no <m>" after a full rewrite and shader pass. It cannot be loaded anyway:
+    // drop it here, so the assemble and the boot both use the modules that exist. main is the exception -- without it there is no game.
+    if !no_input.is_empty() {
+        if no_input.iter().any(|m| m == "main") {
+            return Err(PipelineError::missing(format!(
+                "this game's ExeFS has no main in {}",
+                exe_dir.display()
+            )));
+        }
+        let kept: Vec<String> = modules
+            .iter()
+            .filter(|m| !no_input.contains(m))
+            .cloned()
+            .collect();
+        ctx.log(&format!(
+            "modules: {} (dropped {}: listed by the profile, not in this game's ExeFS)",
+            kept.join(" "),
+            no_input.join(" ")
+        ));
+        ctx.cfg.set("modules", kept.join(" "));
     }
     finish_rewrite(ctx)?;
     Ok(out_dir)

@@ -2239,3 +2239,29 @@ fn the_skip_draws_row_defaults_to_what_the_boot_will_do() {
     fx.set_cfg("pso_nowait", "1");
     assert_eq!(row_default(&fx), "1");
 }
+
+// ---- a module the profile lists but the ExeFS does not carry (device log 2026-11-23, Mario Kart World base .nup: "the rewrite wrote no subsdk1") ------------------------
+
+#[test]
+fn a_module_missing_from_the_exefs_is_dropped_not_assembled() {
+    let mut fx = Fx::new();
+    fx.ctx.adapters.rewriter = Arc::new(CountingRewriter::default());
+    let tid = "0100ABCD12340000";
+    write(fx.p("exe/main"), "MAIN");
+    write(fx.p("exe/sdk"), "SDK");
+    fx.cfg("");
+    fx.profile(&format!("title_id\t{tid}\n"));
+    fx.set_cfg("exe_dir", &fx.p("exe").to_string_lossy());
+    fx.set_cfg("modules", "main subsdk1 sdk");
+    fx.set_cfg("extract_out", &fx.p("extract").to_string_lossy());
+    let out = do_rewrite(&mut fx.ctx).unwrap();
+    assert_eq!(fx.ctx.cfg.get("modules"), Some("main sdk"));
+    assert!(fx.log.contains("dropped subsdk1"), "{:?}", fx.log.lines());
+    assert!(out.join("main/main.patched.bin").is_file() && !out.join("subsdk1").exists());
+
+    // without main there is no game: refused at stage 2, not after the shaders
+    fs::remove_file(fx.p("exe/main")).unwrap();
+    fx.set_cfg("modules", "main sdk");
+    let err = do_rewrite(&mut fx.ctx).unwrap_err().to_string();
+    assert!(err.contains("has no main"), "{err}");
+}

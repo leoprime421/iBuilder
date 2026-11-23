@@ -121,6 +121,22 @@ pub fn boot_only(ctx: &mut Ctx) -> i32 {
         .map(PathBuf::from)
         .unwrap_or_else(|| ctx.docs.extract())
         .join("flat");
+    // The profile can list a module this game's ExeFS does not carry (Mario Kart World's base .nup has no subsdk1): stage 2 dropped it, so flat/ has none of its files. Asking the
+    // host for it would fail the boot the build just finished; boot what was assembled. main always stays: without it there is no game, and the host says so.
+    let modules = {
+        let all: Vec<&str> = modules.split_whitespace().collect();
+        let (kept, gone): (Vec<&str>, Vec<&str>) = all.iter().partition(|m| {
+            **m == "main" || !is_dir(&flat) || is_file(&flat.join(format!("{m}.patched.bin")))
+        });
+        if !gone.is_empty() {
+            ctx.log(&format!(
+                "boot-only: modules {} (not in flat/, the game's ExeFS has no {}: the build dropped it)",
+                kept.join(" "),
+                gone.join(" ")
+            ));
+        }
+        kept.join(" ")
+    };
     let profile = ctx.cfg.get_or("profile", "").to_string();
     // Nothing to boot from: the request can never be honoured until a build exists, so it goes (an armed request nobody can honour would make every launch try, and fail, by itself).
     // The next tap runs the whole chain.
